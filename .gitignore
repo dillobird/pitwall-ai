@@ -1,0 +1,65 @@
+# --------------------
+# Environment / secrets
+# --------------------
+.env
+.env.*
+!.env.example
+
+# --------------------
+# Python bytecode
+# --------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --------------------
+# Virtual environments
+# --------------------
+.venv/
+venv/
+env/
+ENV/
+
+# --------------------
+# IDE / editor settings
+# --------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --------------------
+# OS files
+# --------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# --------------------
+# Logs and runtime output
+# --------------------
+*.log
+logs/
+*.sqlite
+*.db
+
+# --------------------
+# Test / coverage artifacts
+# --------------------
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --------------------
+# Packaging / build
+# --------------------
+build/
+dist/
+*.egg-info/
+
+# --------------------
+# Local data dumps (OpenF1 responses, debug JSON)
+# --------------------
+data/
+*.jsonl
+
