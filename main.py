@@ -9,8 +9,12 @@ def run_terminal_agent():
         if user_input.lower() == "exit":
             print("Goodbye.")
             break
-
-        messages.append({"role": "user", "content": user_input})
+        elif user_input.lower() == "test":
+            test_prompt = "Give me the results of the 2025 Chinese GP."
+            print("Testing with prompt: ", test_prompt)
+            messages.append({"role": "user", "content": test_prompt})
+        else:
+            messages.append({"role": "user", "content": user_input})
         reply = run_agent_step(messages)
         print(f"PitwallAI: {reply}")
 

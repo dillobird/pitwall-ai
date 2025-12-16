@@ -1,57 +1,154 @@
+import os
 import json
 import logging
-from datetime import datetime
-from openai_client import client
+from dotenv import load_dotenv
+from openai import OpenAI
 from tool_registry import TOOLS, call_tool
-from prompts import SYSTEM_PROMPT
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+# Load environment variables from .env file
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+
+# Initialize OpenAI client with API key from environment
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def run_agent_step(messages):
-    logging.info("Sending message to OpenAI...")
-    response = client.chat.completions.create(
-        model="gpt-5",
-        messages=messages,
-        tools=TOOLS,
-    )
-    logging.info("Received response from GPT.")
+    """
+    Sends messages to the OpenAI Responses API and returns the assistant's reply.
+    Handles function calls by executing them and continuing the conversation using previous_response_id.
+    """
+    max_iterations = 10  # Prevent infinite loops
+    iteration = 0
+    previous_response_id = None
+    tool_results = None
 
-    msg = response.choices[0].message
-    messages.append(msg)
+    while iteration < max_iterations:
+        iteration += 1
+        logging.info(f"Sending messages to OpenAI Responses API (iteration {iteration})...")
+        if previous_response_id:
+            logging.info(f"Continuing with previous_response_id: {previous_response_id}")
+        if tool_results:
+            logging.info(f"Tool results: {json.dumps(tool_results, indent=2)}")
+        logging.info(f"Messages: {json.dumps(messages, indent=2)}")
 
-    if not msg.tool_calls:
-        return msg.content
+        try:
+            # Build request parameters
+            request_params = {
+                "model": "gpt-5",
+                "tools": TOOLS,
+                "metadata": {"succinct": "true"}
+            }
 
-    for tool_call in msg.tool_calls:
-        logging.info(
-            "Tool call detected: %s(%s)",
-            tool_call.function.name,
-            tool_call.function.arguments,
-        )
+            if previous_response_id:
+                request_params["previous_response_id"] = previous_response_id
+                if tool_results:
+                    # 🔧 FIX: tool results must be passed as input items
+                    request_params["input"] = tool_results
+            else:
+                # First request - send the input messages
+                request_params["input"] = messages
 
-        result = call_tool(tool_call.function.name, tool_call.function.arguments)
-        logging.info("Tool result: %s", str(result)[:200])  # truncate if large
+            response = client.responses.create(**request_params)
+            logging.info(f"Raw response object: {response}")
 
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call.id,
-            "content": json.dumps(result),
-        })
+            # Check if we have a text response
+            if response.output_text:
+                messages.append({
+                    "role": "assistant",
+                    "content": response.output_text
+                })
+                previous_response_id = None
+                tool_results = None
+                return response.output_text
 
-    followup = client.chat.completions.create(
-        model="gpt-5",
-        messages=messages,
-    )
+            # Check for function calls in the output
+            function_calls = []
+            if response.output:
+                for item in response.output:
+                    item_type = getattr(item, "type", None)
+                    if item_type == "function_call":
+                        function_calls.append(item)
+                    elif hasattr(item, "__class__"):
+                        class_name = item.__class__.__name__
+                        if "FunctionToolCall" in class_name:
+                            function_calls.append(item)
 
-    final_msg = followup.choices[0].message
-    messages.append(final_msg)
+            if function_calls:
+                previous_response_id = response.id
+                tool_results = []
 
-    return final_msg.content
+                for func_call in function_calls:
+                    call_id = getattr(func_call, "call_id", None)
+                    func_name = getattr(func_call, "name", None)
+                    func_args = getattr(func_call, "arguments", None)
 
+                    if not all([call_id, func_name, func_args]):
+                        logging.warning(
+                            f"Incomplete function call: call_id={call_id}, "
+                            f"name={func_name}, args={func_args}"
+                        )
+                        continue
 
-def new_conversation():
-    return [{"role": "system", "content": SYSTEM_PROMPT}]
+                    logging.info(f"Executing function call: {func_name} with args: {func_args}")
+
+                    try:
+                        result = call_tool(func_name, func_args)
+                        result_json = json.dumps(result) if not isinstance(result, str) else result
+
+                        # 🔧 FIX: correct Responses API tool output shape
+                        tool_results.append({
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": result_json
+                        })
+
+                        logging.info(
+                            f"Function {func_name} returned: "
+                            f"{result_json[:200] if len(result_json) > 200 else result_json}"
+                        )
+                    except Exception as e:
+                        logging.error(
+                            f"Error executing function {func_name}: {e}",
+                            exc_info=True
+                        )
+                        tool_results.append({
+                            "type": "function_call_output",
+                            "call_id": call_id,
+                            "output": json.dumps({"error": str(e)})
+                        })
+
+                if tool_results:
+                    continue
+                else:
+                    logging.warning("No tool results generated from function calls")
+                    return None
+
+            logging.warning("No text response and no function calls found")
+            return None
+
+        except Exception as e:
+            logging.error(f"Error in run_agent_step: {e}", exc_info=True)
+            raise
+
+    logging.error(f"Reached max iterations ({max_iterations}) without getting a text response")
+    return None
+
+def new_conversation(system_prompt=None):
+    """
+    Returns a new conversation template for the agent.
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    logging.info(f"New conversation created: {messages}")
+    return messages
+
+if __name__ == "__main__":
+    messages = new_conversation("You are a Formula 1 statistics assistant.")
+    messages.append({"role": "user", "content": "Give me the results of the 2025 Chinese GP."})
+
+    logging.info("Running terminal agent test...")
+    reply = run_agent_step(messages)
+    print("\nAssistant reply:\n", reply)
