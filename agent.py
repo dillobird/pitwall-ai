@@ -5,13 +5,10 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tool_registry import TOOLS, call_tool
 
-# Load environment variables from .env file
 load_dotenv()
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
-# Initialize OpenAI client with API key from environment
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def run_agent_step(messages):
@@ -19,7 +16,7 @@ def run_agent_step(messages):
     Sends messages to the OpenAI Responses API and returns the assistant's reply.
     Handles function calls by executing them and continuing the conversation using previous_response_id.
     """
-    max_iterations = 10  # Prevent infinite loops
+    max_iterations = 10
     iteration = 0
     previous_response_id = None
     tool_results = None
@@ -28,10 +25,10 @@ def run_agent_step(messages):
         iteration += 1
         logging.info(f"Sending messages to OpenAI Responses API (iteration {iteration})...")
         if previous_response_id:
-            logging.info(f"Continuing with previous_response_id: {previous_response_id}")
+            logging.debug(f"Continuing with previous_response_id: {previous_response_id}")
         if tool_results:
-            logging.info(f"Tool results: {json.dumps(tool_results, indent=2)}")
-        logging.info(f"Messages: {json.dumps(messages, indent=2)}")
+            logging.debug(f"Tool results: {json.dumps(tool_results, indent=2)}")
+        logging.debug(f"Messages: {json.dumps(messages, indent=2)}")
 
         try:
             # Build request parameters
@@ -44,14 +41,13 @@ def run_agent_step(messages):
             if previous_response_id:
                 request_params["previous_response_id"] = previous_response_id
                 if tool_results:
-                    # 🔧 FIX: tool results must be passed as input items
                     request_params["input"] = tool_results
             else:
                 # First request - send the input messages
                 request_params["input"] = messages
 
             response = client.responses.create(**request_params)
-            logging.info(f"Raw response object: {response}")
+            logging.debug(f"Raw response object: {response}")
 
             # Check if we have a text response
             if response.output_text:
@@ -85,10 +81,7 @@ def run_agent_step(messages):
                     func_args = getattr(func_call, "arguments", None)
 
                     if not all([call_id, func_name, func_args]):
-                        logging.warning(
-                            f"Incomplete function call: call_id={call_id}, "
-                            f"name={func_name}, args={func_args}"
-                        )
+                        logging.warning(f"Incomplete function call: call_id={call_id}, name={func_name}, args={func_args}")
                         continue
 
                     logging.info(f"Executing function call: {func_name} with args: {func_args}")
@@ -97,22 +90,15 @@ def run_agent_step(messages):
                         result = call_tool(func_name, func_args)
                         result_json = json.dumps(result) if not isinstance(result, str) else result
 
-                        # 🔧 FIX: correct Responses API tool output shape
                         tool_results.append({
                             "type": "function_call_output",
                             "call_id": call_id,
                             "output": result_json
                         })
 
-                        logging.info(
-                            f"Function {func_name} returned: "
-                            f"{result_json[:200] if len(result_json) > 200 else result_json}"
-                        )
+                        logging.debug(f"Function {func_name} returned: {result_json}")
                     except Exception as e:
-                        logging.error(
-                            f"Error executing function {func_name}: {e}",
-                            exc_info=True
-                        )
+                        logging.error(f"Error executing function {func_name}: {e}", exc_info=True)
                         tool_results.append({
                             "type": "function_call_output",
                             "call_id": call_id,
@@ -136,9 +122,6 @@ def run_agent_step(messages):
     return None
 
 def new_conversation(system_prompt=None):
-    """
-    Returns a new conversation template for the agent.
-    """
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
@@ -146,7 +129,14 @@ def new_conversation(system_prompt=None):
     return messages
 
 if __name__ == "__main__":
-    messages = new_conversation("You are a Formula 1 statistics assistant.")
+    messages = new_conversation("""
+        You are a Formula 1 statistics assistant.
+        Tool usage rules:
+            - Use the most specific identifier available.
+            - session_key is more specific than meeting_key.
+            - If a session_key is known at the time of a tool call, do not include meeting_key.
+            - Tools may ignore redundant identifiers.
+    """)
     messages.append({"role": "user", "content": "Give me the results of the 2025 Chinese GP."})
 
     logging.info("Running terminal agent test...")
