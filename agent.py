@@ -125,19 +125,10 @@ def new_conversation(system_prompt=None):
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
-    logging.info(f"New conversation created: {messages}")
     return messages
 
 if __name__ == "__main__":
-    messages = new_conversation("""
-        You are a Formula 1 statistics assistant.
-        Tool usage rules:
-            - Use the most specific identifier available.
-            - session_key is more specific than meeting_key.
-            - If a session_key is known at the time of a tool call, do not include meeting_key.
-            - Tools may ignore redundant identifiers.
-    """)
-    messages.append({"role": "user", "content": "Give me the results of the 2025 Chinese GP."})
+    messages = new_conversation(SYSTEM_PROMPT)
 
     logging.info("Running terminal agent test...")
     reply = run_agent_step(messages)
